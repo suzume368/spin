@@ -1,223 +1,211 @@
-#!/usr/bin/env python3
-"""
-SpinPK Auto Spin Bot
-Runs every hour via GitHub Actions
-"""
-
 import requests
-import json
-import time
 import os
-import sys
-from datetime import datetime
+import json
 import logging
+from datetime import datetime
+import time
 
-# ==================== CONFIGURATION ====================
-# GitHub Secrets se read karein
-TOKEN = os.environ.get('SPINPK_TOKEN', '1f5587940e9546229e1c1426cea08f9a88e89a48db6f018d04420a5e0e6e04db')
-DEVICE_ID = os.environ.get('SPINPK_DEVICE_ID', 'f607b24295e557fe')
-
-# API Endpoints
-BASE_URL = "https://spinpk.net/api"
-HEARTBEAT_URL = f"{BASE_URL}/me.php"
-SPIN_URL = f"{BASE_URL}/spin.php"
-
-# ==================== LOGGING ====================
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('spinpk_bot.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# ==================== HEADERS ====================
-def get_headers():
-    """Return headers for API requests"""
-    return {
-        'sec-ch-ua-platform': '"Android"',
-        'authorization': f'Bearer {TOKEN}',
-        'x-device-id': DEVICE_ID,
-        'user-agent': 'Mozilla/5.0 (Linux; Android 11; Infinix X659B Build/RP1A.200720.011; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/152.0.7977.30 Mobile Safari/537.36',
-        'sec-ch-ua': '"Chromium";v="152", "Not?A_Brand";v="24", "Android WebView";v="152"',
-        'content-type': 'application/json',
-        'sec-ch-ua-mobile': '?1',
-        'accept': '/',
-        'origin': 'null',
-        'x-requested-with': 'com.spinpk.app',
-        'sec-fetch-site': 'cross-site',
-        'sec-fetch-mode': 'cors',
-        'sec-fetch-dest': 'empty',
-        'accept-encoding': 'gzip, deflate, zstd',
-        'accept-language': 'en-US,en;q=0.9',
-        'priority': 'u=1, i'
-    }
-
-# ==================== API FUNCTIONS ====================
-def heartbeat():
-    """Send heartbeat request to /me.php"""
-    try:
-        logger.info("📤 Sending heartbeat...")
-        headers = get_headers()
-        data = {"action": "heartbeat"}
+class SpinPKBot:
+    def __init__(self):
+        self.email = os.getenv('SPINPK_EMAIL')
+        self.password = os.getenv('SPINPK_PASSWORD')
+        self.device_id = os.getenv('SPINPK_DEVICE_ID', 'f607b24295e557fe')
+        self.base_url = 'https://spinpk.net/api'
+        self.token = None
+        self.user_data = None
+        self.config = None
+        self.session = requests.Session()
         
-        response = requests.post(
-            HEARTBEAT_URL,
-            headers=headers,
-            json=data,
-            timeout=30
-        )
+    def get_headers(self, token=None):
+        """Generate headers for API requests"""
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 11; Infinix X659B Build/RP1A.200720.011; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/152.0.7977.42 Mobile Safari/537.36',
+            'Content-Type': 'application/json',
+            'X-Device-Id': self.device_id,
+            'X-Requested-With': 'com.spinpk.app',
+            'Accept': '*/*',
+            'Origin': 'null'
+        }
         
-        logger.info(f"📥 Heartbeat response: {response.status_code}")
+        if token:
+            headers['Authorization'] = f'Bearer {token}'
         
-        if response.status_code == 200:
-            try:
-                result = response.json()
-                logger.info(f"✅ Heartbeat successful: {json.dumps(result, indent=2)[:200]}...")
-                
-                # Save heartbeat result
-                with open('heartbeat_result.json', 'w') as f:
-                    json.dump(result, f, indent=2)
-                
-                return result
-            except json.JSONDecodeError:
-                logger.error(f"❌ Failed to parse heartbeat response: {response.text[:200]}")
-                return None
-        else:
-            logger.error(f"❌ Heartbeat failed: {response.status_code} - {response.text[:200]}")
-            return None
+        return headers
+    
+    def login(self):
+        """Login and get fresh token"""
+        logger.info("🔄 Logging in...")
+        
+        try:
+            url = f'{self.base_url}/auth.php'
             
-    except Exception as e:
-        logger.error(f"❌ Heartbeat exception: {str(e)}")
-        return None
-
-def spin():
-    """Send spin request to /spin.php"""
-    try:
-        logger.info("🎰 Sending spin request...")
-        headers = get_headers()
-        data = {"action": "play"}
-        
-        response = requests.post(
-            SPIN_URL,
-            headers=headers,
-            json=data,
-            timeout=30
-        )
-        
-        logger.info(f"📥 Spin response: {response.status_code}")
-        
-        if response.status_code == 200:
-            try:
-                result = response.json()
-                logger.info(f"✅ Spin successful: {json.dumps(result, indent=2)[:200]}...")
-                
-                # Extract reward information if available
-                if 'data' in result:
-                    if 'coins' in result['data']:
-                        logger.info(f"🪙 Coins: {result['data'].get('coins', 'N/A')}")
-                    if 'prize' in result['data']:
-                        logger.info(f"🏆 Prize: {result['data'].get('prize', 'N/A')}")
-                
-                # Save spin result
-                with open('spin_result.json', 'w') as f:
-                    json.dump(result, f, indent=2)
-                
-                return result
-            except json.JSONDecodeError:
-                logger.error(f"❌ Failed to parse spin response: {response.text[:200]}")
-                return None
-        else:
-            logger.error(f"❌ Spin failed: {response.status_code} - {response.text[:200]}")
-            return None
+            payload = {
+                "action": "login",
+                "email": self.email,
+                "password": self.password
+            }
             
-    except Exception as e:
-        logger.error(f"❌ Spin exception: {str(e)}")
-        return None
-
-def check_token_validity():
-    """Check if token is valid by making a test request"""
-    try:
-        logger.info("🔍 Checking token validity...")
-        headers = get_headers()
-        data = {"action": "heartbeat"}
+            response = self.session.post(
+                url,
+                headers=self.get_headers(),
+                json=payload,
+                timeout=10
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if data.get('ok') and 'token' in data:
+                self.token = data['token']
+                logger.info(f"✅ Login successful! Token: {self.token[:30]}...")
+                return True
+            else:
+                logger.error(f"❌ Login failed: {data}")
+                return False
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ Login request failed: {e}")
+            return False
+    
+    def get_user_data(self):
+        """Get user info and config"""
+        logger.info("📊 Fetching user data...")
         
-        response = requests.post(
-            HEARTBEAT_URL,
-            headers=headers,
-            json=data,
-            timeout=10
-        )
+        try:
+            url = f'{self.base_url}/auth.php'
+            
+            payload = {"action": "me"}
+            
+            response = self.session.post(
+                url,
+                headers=self.get_headers(self.token),
+                json=payload,
+                timeout=10
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if data.get('ok'):
+                self.user_data = data.get('user', {})
+                self.config = data.get('config', {})
+                
+                logger.info(f"✅ User: {self.user_data.get('name')}")
+                logger.info(f"💰 Balance: {self.user_data.get('balance')} PKR")
+                logger.info(f"🎡 Last spin: {self.user_data.get('last_spin_at')}")
+                
+                return True
+            else:
+                logger.error(f"❌ Failed to get user data: {data}")
+                return False
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ Request failed: {e}")
+            return False
+    
+    def can_spin(self):
+        """Check if user can spin"""
+        if not self.user_data:
+            return False
         
-        if response.status_code == 200:
-            logger.info("✅ Token is valid")
+        last_spin = self.user_data.get('last_spin_at', 0)
+        spin_interval = self.config.get('spin_interval_sec', 7200)
+        current_time = int(time.time())
+        
+        time_since_spin = current_time - last_spin
+        
+        logger.info(f"⏱️  Last spin: {last_spin}, Current: {current_time}")
+        logger.info(f"⏱️  Spin interval: {spin_interval} seconds ({spin_interval//3600} hours)")
+        logger.info(f"⏱️  Time since last spin: {time_since_spin} seconds")
+        
+        if time_since_spin >= spin_interval:
+            logger.info(f"✅ Can spin! ({time_since_spin}s >= {spin_interval}s)")
             return True
-        elif response.status_code == 401:
-            logger.error("❌ Token is invalid or expired")
-            return False
         else:
-            logger.warning(f"⚠️ Token check returned: {response.status_code}")
+            wait_time = spin_interval - time_since_spin
+            logger.warning(f"⏳ Cannot spin yet. Wait {wait_time} seconds ({wait_time//3600}h {(wait_time%3600)//60}m)")
             return False
+    
+    def spin(self):
+        """Perform spin action"""
+        logger.info("🎡 Attempting to spin...")
+        
+        try:
+            url = f'{self.base_url}/spin.php'
             
-    except Exception as e:
-        logger.error(f"❌ Token check failed: {str(e)}")
-        return False
+            payload = {"action": "spin"}
+            
+            response = self.session.post(
+                url,
+                headers=self.get_headers(self.token),
+                json=payload,
+                timeout=10
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if data.get('ok'):
+                win_amount = data.get('amount', 0)
+                logger.info(f"✅ SPIN SUCCESSFUL! Won: {win_amount} PKR 🎉")
+                
+                # Save result
+                with open('spin_results.json', 'a') as f:
+                    f.write(json.dumps({
+                        'timestamp': datetime.now().isoformat(),
+                        'amount': win_amount,
+                        'status': 'success'
+                    }) + '\n')
+                
+                return True
+            else:
+                error = data.get('error', 'Unknown error')
+                logger.warning(f"⚠️  Spin failed: {error}")
+                return False
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ Spin request failed: {e}")
+            return False
+    
+    def run(self):
+        """Main bot logic"""
+        logger.info("=" * 60)
+        logger.info(f"🚀 SpinPK Bot Started at {datetime.now()}")
+        logger.info("=" * 60)
+        
+        # Step 1: Login
+        if not self.login():
+            logger.error("❌ Login failed! Exiting...")
+            return False
+        
+        # Step 2: Get user data
+        if not self.get_user_data():
+            logger.error("❌ Failed to fetch user data! Exiting...")
+            return False
+        
+        # Step 3: Check if can spin
+        if not self.can_spin():
+            logger.info("⏳ Waiting for next spin window...")
+            return True
+        
+        # Step 4: Perform spin
+        if not self.spin():
+            logger.warning("⚠️  Spin attempt failed but bot continues...")
+            return True
+        
+        logger.info("=" * 60)
+        logger.info("✅ Bot execution completed successfully!")
+        logger.info("=" * 60)
+        
+        return True
 
-# ==================== MAIN FUNCTION ====================
-def run_bot():
-    """Main bot execution function"""
-    start_time = datetime.now()
-    logger.info("=" * 60)
-    logger.info(f"🚀 SpinPK Bot Started at {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info("=" * 60)
-    
-    # Check token validity
-    if not check_token_validity():
-        logger.error("❌ Token invalid! Exiting...")
-        return False
-    
-    # Step 1: Send heartbeat
-    logger.info("\n📌 STEP 1: Heartbeat")
-    heartbeat_result = heartbeat()
-    if not heartbeat_result:
-        logger.warning("⚠️ Heartbeat failed, but continuing...")
-    
-    # Step 2: Send spin request
-    logger.info("\n📌 STEP 2: Spin")
-    spin_result = spin()
-    if not spin_result:
-        logger.warning("⚠️ Spin failed!")
-    
-    # Save summary
-    summary = {
-        'timestamp': start_time.isoformat(),
-        'heartbeat_success': heartbeat_result is not None,
-        'spin_success': spin_result is not None,
-        'heartbeat_response': heartbeat_result,
-        'spin_response': spin_result
-    }
-    
-    with open('summary.json', 'w') as f:
-        json.dump(summary, f, indent=2)
-    
-    # Log completion
-    end_time = datetime.now()
-    duration = (end_time - start_time).total_seconds()
-    logger.info("\n" + "=" * 60)
-    logger.info(f"✅ Bot completed in {duration:.2f} seconds")
-    logger.info("=" * 60)
-    
-    return spin_result is not None
-
-# ==================== ENTRY POINT ====================
 if __name__ == "__main__":
-    # Run the bot
-    success = run_bot()
-    
-    # Exit with appropriate code for GitHub Actions
-    if success:
-        sys.exit(0)  # Success
-    else:
-        sys.exit(1)  # Failure
+    bot = SpinPKBot()
+    success = bot.run()
+    exit(0 if success else 1)
