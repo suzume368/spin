@@ -20,13 +20,24 @@ class SpinPKBot:
         self.config = None
         self.session = requests.Session()
         
-        # Validation
+        # Enhanced Validation with detailed error messages
+        logger.info("=" * 60)
+        logger.info("🔐 Validating Configuration...")
+        logger.info("=" * 60)
+        
         if not self.token:
-            logger.error("❌ SPINPK_TOKEN must be set!")
-            logger.error("📝 Please add SPINPK_TOKEN secret to GitHub repository settings")
+            logger.error("❌ SPINPK_TOKEN is NOT set!")
+            logger.error("📝 Action Required: Add SPINPK_TOKEN to GitHub Secrets")
+            logger.error("📍 Go to: Repository Settings → Secrets and variables → Actions")
             raise ValueError("Missing SPINPK_TOKEN secret")
         
-        logger.info(f"✅ Token found (length: {len(self.token)})")
+        if len(self.token.strip()) == 0:
+            logger.error("❌ SPINPK_TOKEN is empty!")
+            raise ValueError("SPINPK_TOKEN cannot be empty")
+        
+        logger.info(f"✅ SPINPK_TOKEN found (length: {len(self.token)} chars)")
+        logger.info(f"✅ SPINPK_DEVICE_ID: {self.device_id[:8]}...{self.device_id[-4:] if len(self.device_id) > 12 else ''}")
+        logger.info("=" * 60)
         
     def get_headers(self):
         """Generate headers for API requests"""
@@ -51,6 +62,9 @@ class SpinPKBot:
             
             payload = {"action": "me"}
             
+            logger.info(f"🔗 Calling: {url}")
+            logger.info(f"📤 Headers: Authorization: Bearer {self.token[:10]}...")
+            
             response = self.session.post(
                 url,
                 headers=self.get_headers(),
@@ -58,10 +72,20 @@ class SpinPKBot:
                 timeout=10
             )
             
+            logger.info(f"📥 Response Status: {response.status_code}")
+            
             # Better error handling for auth failures
             if response.status_code == 401:
                 logger.error("❌ 401 Unauthorized - Token is invalid or expired")
-                logger.error("📝 Please verify your SPINPK_TOKEN in GitHub secrets")
+                logger.error("📝 Possible Solutions:")
+                logger.error("   1. Token may have expired - refresh it from SpinPK app")
+                logger.error("   2. Device ID mismatch - verify SPINPK_DEVICE_ID")
+                logger.error("   3. Token format incorrect - check for extra spaces/characters")
+                logger.error("📝 Update your secrets in GitHub: Settings → Secrets and variables → Actions")
+                return False
+            
+            if response.status_code != 200:
+                logger.error(f"❌ API Error {response.status_code}: {response.text}")
                 return False
             
             response.raise_for_status()
@@ -82,8 +106,18 @@ class SpinPKBot:
                 logger.error(f"❌ Failed to get user data: {error}")
                 return False
                 
+        except requests.exceptions.Timeout:
+            logger.error("❌ Request timeout - API server not responding")
+            return False
+        except requests.exceptions.ConnectionError:
+            logger.error("❌ Connection error - check internet connection")
+            return False
         except requests.exceptions.RequestException as e:
             logger.error(f"❌ Request failed: {e}")
+            logger.error(f"📝 Response content: {e.response.text if hasattr(e, 'response') and e.response else 'N/A'}")
+            return False
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Invalid JSON response: {e}")
             return False
     
     def calculate_next_spin_time(self):
