@@ -13,73 +13,31 @@ logger = logging.getLogger(__name__)
 
 class SpinPKBot:
     def __init__(self):
-        self.email = os.getenv('SPINPK_EMAIL')
-        self.password = os.getenv('SPINPK_PASSWORD')
+        self.token = os.getenv('SPINPK_TOKEN')
         self.device_id = os.getenv('SPINPK_DEVICE_ID', 'f607b24295e557fe')
         self.base_url = 'https://spinpk.net/api'
-        self.token = None
         self.user_data = None
         self.config = None
         self.session = requests.Session()
         
         # Validation
-        if not self.email or not self.password:
-            logger.error("❌ SPINPK_EMAIL and SPINPK_PASSWORD must be set!")
-            raise ValueError("Missing credentials")
+        if not self.token:
+            logger.error("❌ SPINPK_TOKEN must be set!")
+            raise ValueError("Missing token")
         
-    def get_headers(self, token=None):
+    def get_headers(self):
         """Generate headers for API requests"""
         headers = {
             'User-Agent': 'Mozilla/5.0 (Linux; Android 11; Infinix X659B Build/RP1A.200720.011; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/152.0.7977.42 Mobile Safari/537.36',
             'Content-Type': 'application/json',
             'X-Device-Id': self.device_id,
             'X-Requested-With': 'com.spinpk.app',
+            'Authorization': f'Bearer {self.token}',
             'Accept': '*/*',
             'Origin': 'null'
         }
         
-        if token:
-            headers['Authorization'] = f'Bearer {token}'
-        
         return headers
-    
-    def login(self):
-        """Login with email/password and get fresh token"""
-        logger.info("🔄 Logging in with email/password...")
-        
-        try:
-            url = f'{self.base_url}/auth.php'
-            
-            payload = {
-                "action": "login",
-                "email": self.email,
-                "password": self.password
-            }
-            
-            response = self.session.post(
-                url,
-                headers=self.get_headers(),
-                json=payload,
-                timeout=10
-            )
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            if data.get('ok') and 'token' in data:
-                self.token = data['token']
-                logger.info(f"✅ Login successful! Token: {self.token[:30]}...")
-                return True
-            else:
-                error = data.get('error', data.get('message', 'Unknown error'))
-                logger.error(f"❌ Login failed: {error}")
-                if 'update' in error.lower():
-                    logger.error("⚠️  API requires app update - credentials may be outdated!")
-                return False
-                
-        except requests.exceptions.RequestException as e:
-            logger.error(f"❌ Login request failed: {e}")
-            return False
     
     def get_user_data(self):
         """Get user info and config"""
@@ -92,7 +50,7 @@ class SpinPKBot:
             
             response = self.session.post(
                 url,
-                headers=self.get_headers(self.token),
+                headers=self.get_headers(),
                 json=payload,
                 timeout=10
             )
@@ -106,11 +64,12 @@ class SpinPKBot:
                 
                 logger.info(f"✅ User: {self.user_data.get('name', 'Unknown')}")
                 logger.info(f"💰 Balance: {self.user_data.get('balance')} PKR")
-                logger.info(f"🎡 Last spin: {self.user_data.get('last_spin_at')}")
+                logger.info(f"🎡 Last spin: {datetime.fromtimestamp(self.user_data.get('last_spin_at', 0))}")
                 
                 return True
             else:
-                logger.error(f"❌ Failed to get user data: {data}")
+                error = data.get('error', data.get('message', 'Unknown error'))
+                logger.error(f"❌ Failed to get user data: {error}")
                 return False
                 
         except requests.exceptions.RequestException as e:
@@ -123,7 +82,7 @@ class SpinPKBot:
             return None
         
         last_spin = self.user_data.get('last_spin_at', 0)
-        spin_interval = self.config.get('spin_interval_sec', 7200)  # Default 2 hours
+        spin_interval = self.config.get('spin_interval_sec', 7800)  # Default 2h 10m (7800 seconds)
         
         next_spin_time = last_spin + spin_interval
         return next_spin_time
@@ -134,24 +93,28 @@ class SpinPKBot:
             return False
         
         last_spin = self.user_data.get('last_spin_at', 0)
-        spin_interval = self.config.get('spin_interval_sec', 7200)
+        spin_interval = self.config.get('spin_interval_sec', 7800)
         current_time = int(time.time())
         
         time_since_spin = current_time - last_spin
         
+        hours = spin_interval // 3600
+        minutes = (spin_interval % 3600) // 60
+        seconds = spin_interval % 60
+        
         logger.info(f"⏱️  Last spin: {datetime.fromtimestamp(last_spin)}")
-        logger.info(f"⏱️  Spin interval: {spin_interval} seconds ({spin_interval//3600} hours {(spin_interval%3600)//60} minutes)")
-        logger.info(f"⏱️  Time since last spin: {time_since_spin} seconds")
+        logger.info(f"⏱️  Spin interval: {spin_interval}s ({hours}h {minutes}m {seconds}s)")
+        logger.info(f"⏱️  Time since last spin: {time_since_spin}s")
         
         if time_since_spin >= spin_interval:
             logger.info(f"✅ Can spin! ({time_since_spin}s >= {spin_interval}s)")
             return True
         else:
             wait_time = spin_interval - time_since_spin
-            hours = wait_time // 3600
-            minutes = (wait_time % 3600) // 60
-            seconds = wait_time % 60
-            logger.warning(f"⏳ Cannot spin yet. Wait {hours}h {minutes}m {seconds}s")
+            h = wait_time // 3600
+            m = (wait_time % 3600) // 60
+            s = wait_time % 60
+            logger.warning(f"⏳ Cannot spin yet. Wait {h}h {m}m {s}s")
             return False
     
     def spin(self):
@@ -165,7 +128,7 @@ class SpinPKBot:
             
             response = self.session.post(
                 url,
-                headers=self.get_headers(self.token),
+                headers=self.get_headers(),
                 json=payload,
                 timeout=10
             )
@@ -175,7 +138,8 @@ class SpinPKBot:
             
             if data.get('ok'):
                 win_amount = data.get('amount', 0)
-                logger.info(f"✅ SPIN SUCCESSFUL! Won: {win_amount} PKR 🎉")
+                new_balance = data.get('balance', 0)
+                logger.info(f"✅ SPIN SUCCESSFUL! Won: {win_amount} PKR | New Balance: {new_balance} PKR 🎉")
                 
                 # Save result with next spin time
                 next_spin = self.calculate_next_spin_time()
@@ -183,6 +147,7 @@ class SpinPKBot:
                     f.write(json.dumps({
                         'timestamp': datetime.now().isoformat(),
                         'amount': win_amount,
+                        'balance': new_balance,
                         'status': 'success',
                         'next_spin_available': datetime.fromtimestamp(next_spin).isoformat() if next_spin else None
                     }) + '\n')
@@ -198,48 +163,50 @@ class SpinPKBot:
             return False
     
     def save_next_spin_info(self):
-        """Save next spin time for external scheduling"""
+        """Save next spin time for scheduling reference"""
         next_spin = self.calculate_next_spin_time()
         if next_spin:
+            remaining_seconds = next_spin - int(time.time())
+            hours = remaining_seconds // 3600
+            minutes = (remaining_seconds % 3600) // 60
+            
             info = {
                 'next_spin_timestamp': next_spin,
                 'next_spin_datetime': datetime.fromtimestamp(next_spin).isoformat(),
-                'hours_until_spin': (next_spin - int(time.time())) / 3600,
+                'hours_until_spin': hours,
+                'minutes_until_spin': minutes,
+                'total_seconds_until_spin': remaining_seconds,
                 'saved_at': datetime.now().isoformat()
             }
             with open('next_spin_info.json', 'w') as f:
                 json.dump(info, f, indent=2)
-            logger.info(f"📝 Next spin info saved: {info['next_spin_datetime']}")
+            logger.info(f"📝 Next spin: {info['next_spin_datetime']} ({hours}h {minutes}m remaining)")
     
     def run(self):
         """Main bot logic"""
         logger.info("=" * 60)
         logger.info(f"🚀 SpinPK Bot Started at {datetime.now()}")
+        logger.info(f"📱 Device: {self.device_id}")
         logger.info("=" * 60)
         
         try:
-            # Step 1: Login
-            if not self.login():
-                logger.error("❌ Login failed! Exiting...")
-                return False
-            
-            # Step 2: Get user data
+            # Step 1: Get user data
             if not self.get_user_data():
                 logger.error("❌ Failed to fetch user data! Exiting...")
                 return False
             
-            # Step 3: Save next spin info for scheduling reference
+            # Step 2: Save next spin info
             self.save_next_spin_info()
             
-            # Step 4: Check if can spin
+            # Step 3: Check if can spin
             if not self.can_spin():
-                logger.info("⏳ Waiting for next spin window...")
+                logger.info("⏳ Spin not available yet. Waiting...")
                 return True
             
-            # Step 5: Perform spin
+            # Step 4: Perform spin
             if not self.spin():
-                logger.warning("⚠️  Spin attempt failed but bot continues...")
-                return True
+                logger.warning("⚠️  Spin attempt failed!")
+                return False
             
             logger.info("=" * 60)
             logger.info("✅ Bot execution completed successfully!")
