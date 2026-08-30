@@ -2,9 +2,9 @@ name: SpinPK Auto Bot
 
 on:
   schedule:
-    # Runs every hour at minute 0
+    # Run every 10 minutes to catch exact spin moment
     - cron: '*/10 * * * *'
-  workflow_dispatch:  # Manual trigger option
+  workflow_dispatch:
 
 jobs:
   run-bot:
@@ -35,13 +35,9 @@ jobs:
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        - name: Upload results
-  uses: actions/upload-artifact@v4
-  if: always()
-  with:
-    name: spinpk-results-${{ github.run_id }}
-    path: |
-      *.json
-      spin_results.json
-      next_spin_info.json
-    retention-days: 7
+        name: spinpk-results-${{ github.run_id }}
+        path: |
+          *.json
+          spin_results.json
+          next_spin_info.json
+        retention-days: 7
