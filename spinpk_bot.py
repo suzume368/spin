@@ -23,7 +23,10 @@ class SpinPKBot:
         # Validation
         if not self.token:
             logger.error("❌ SPINPK_TOKEN must be set!")
-            raise ValueError("Missing token")
+            logger.error("📝 Please add SPINPK_TOKEN secret to GitHub repository settings")
+            raise ValueError("Missing SPINPK_TOKEN secret")
+        
+        logger.info(f"✅ Token found (length: {len(self.token)})")
         
     def get_headers(self):
         """Generate headers for API requests"""
@@ -54,6 +57,13 @@ class SpinPKBot:
                 json=payload,
                 timeout=10
             )
+            
+            # Better error handling for auth failures
+            if response.status_code == 401:
+                logger.error("❌ 401 Unauthorized - Token is invalid or expired")
+                logger.error("📝 Please verify your SPINPK_TOKEN in GitHub secrets")
+                return False
+            
             response.raise_for_status()
             
             data = response.json()
