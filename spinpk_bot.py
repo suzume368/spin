@@ -19,6 +19,8 @@ class SpinPKBot:
         self.user_data = None
         self.config = None
         self.session = requests.Session()
+        self.max_retries = 10  # Maximum retry attempts
+        self.retry_delay = 5   # Seconds between retries
         
         # Enhanced Validation with detailed error messages
         logger.info("=" * 60)
@@ -162,12 +164,11 @@ class SpinPKBot:
             return False
     
     def spin(self):
-        """Perform spin action"""
+        """Perform spin action with retry logic"""
         logger.info("🎡 Attempting to spin...")
         
         try:
             url = f'{self.base_url}/spin.php'
-            
             payload = {"action": "spin"}
             
             response = self.session.post(
@@ -176,6 +177,17 @@ class SpinPKBot:
                 json=payload,
                 timeout=10
             )
+            
+            # Check for server errors
+            if response.status_code == 400:
+                logger.warning(f"⚠️  400 Bad Request - Server may be unavailable or spin not ready yet")
+                logger.info(f"📝 Response: {response.text}")
+                return "retry"  # Return special code for retry
+            
+            if response.status_code == 429:
+                logger.warning(f"⚠️  429 Too Many Requests - Rate limited, retrying...")
+                return "retry"
+            
             response.raise_for_status()
             
             data = response.json()
@@ -204,7 +216,7 @@ class SpinPKBot:
                 
         except requests.exceptions.RequestException as e:
             logger.error(f"❌ Spin request failed: {e}")
-            return False
+            return "retry"
     
     def save_next_spin_info(self):
         """Save next spin time for scheduling reference"""
@@ -227,7 +239,7 @@ class SpinPKBot:
             logger.info(f"📝 Next spin: {info['next_spin_datetime']} ({hours}h {minutes}m remaining)")
     
     def run(self):
-        """Main bot logic"""
+        """Main bot logic with retry mechanism"""
         logger.info("=" * 60)
         logger.info(f"🚀 SpinPK Bot Started at {datetime.now()}")
         logger.info(f"📱 Device: {self.device_id}")
@@ -247,16 +259,44 @@ class SpinPKBot:
                 logger.info("⏳ Spin not available yet. Waiting...")
                 return True
             
-            # Step 4: Perform spin
-            if not self.spin():
-                logger.warning("⚠️  Spin attempt failed!")
-                return False
-            
-            logger.info("=" * 60)
-            logger.info("✅ Bot execution completed successfully!")
-            logger.info("=" * 60)
-            
-            return True
+            # Step 4: Perform spin with retry logic
+            attempt = 0
+            while attempt < self.max_retries:
+                attempt += 1
+                logger.info(f"🔄 Spin attempt {attempt}/{self.max_retries}")
+                
+                result = self.spin()
+                
+                if result is True:
+                    # Spin successful
+                    logger.info("=" * 60)
+                    logger.info("✅ Bot execution completed successfully!")
+                    logger.info("=" * 60)
+                    return True
+                elif result == "retry":
+                    # Need to retry
+                    if attempt < self.max_retries:
+                        wait_time = self.retry_delay * attempt  # Exponential backoff
+                        logger.info(f"⏳ Waiting {wait_time}s before retry (attempt {attempt}/{self.max_retries})...")
+                        time.sleep(wait_time)
+                        
+                        # Refresh user data to check current spin status
+                        logger.info("🔄 Refreshing user data...")
+                        if not self.get_user_data():
+                            logger.error("❌ Failed to refresh user data!")
+                            continue
+                        
+                        # Check again if spin is still available
+                        if not self.can_spin():
+                            logger.warning("⏳ Spin no longer available after check!")
+                            return True
+                    else:
+                        logger.error(f"❌ Max retries ({self.max_retries}) reached. Giving up.")
+                        return False
+                else:
+                    # Spin failed permanently
+                    logger.error("❌ Spin failed permanently. Exiting...")
+                    return False
             
         except Exception as e:
             logger.error(f"❌ Unexpected error: {e}")
